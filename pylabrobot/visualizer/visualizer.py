@@ -318,89 +318,88 @@ class Visualizer:
       dirname = os.path.dirname(__file__)
       path = os.path.join(dirname, ".")
       if not os.path.exists(path):
-        raise RuntimeError(
-          "Could not find Visualizer files. Please run from the root of the " "repository."
-        )
+          raise RuntimeError(
+              "Could not find Visualizer files. Please run from the root of the " "repository."
+          )
 
       in_colab = 'google.colab' in __import__('sys').modules
+      ws_url_for_js = ""
+      fs_proxy_url = ""
+
+      if in_colab:
+          from google.colab.output import eval_js
+          from urllib.parse import urlparse
+          # Get proxy URLs in the main thread before starting the server.
+          fs_proxy_url = eval_js(f'google.colab.kernel.proxyPort({self.fs_port})')
+          ws_proxy_url_http = eval_js(f'google.colab.kernel.proxyPort({self.ws_port})')
+          parsed_url = urlparse(ws_proxy_url_http)
+          ws_url_for_js = f"wss://{parsed_url.netloc}{parsed_url.path}"
 
       def start_server(lock):
-        ws_host, ws_port, fs_host, fs_port = (
-          self.ws_host,
-          self.ws_port,
-          self.fs_host,
-          self.fs_port,
-        )
+          ws_host, ws_port, fs_host, fs_port = (
+              self.ws_host,
+              self.ws_port,
+              self.fs_host,
+              self.fs_port,
+          )
 
-        # try to start the server. If the port is in use, try with another port until it succeeds.
-        class QuietSimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
-          """A simple HTTP request handler that does not log requests."""
+          class QuietSimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+              def __init__(self, *args, **kwargs):
+                  super().__init__(*args, directory=path, **kwargs)
 
-          def __init__(self, *args, **kwargs):
-            super().__init__(*args, directory=path, **kwargs)
+              def log_message(self, format, *args):
+                  pass
 
-          def log_message(self, format, *args):
-            pass
+              def do_GET(self) -> None:
+                  if self.path == "/":
+                      with open(os.path.join(path, "index.html"), "r", encoding="utf-8") as f:
+                          content = f.read()
 
-          def do_GET(self) -> None:
-            # rewrite some info in the index.html file on the fly,
-            # like a simple template engine
-            if self.path == "/":
-              with open(os.path.join(path, "index.html"), "r", encoding="utf-8") as f:
-                content = f.read()
+                      # Perform template replacements
+                      content = content.replace("{{ ws_url }}", ws_url_for_js)
+                      content = content.replace("{{ fs_host }}", fs_host)
+                      content = content.replace("{{ fs_port }}", str(fs_port))
+                      content = content.replace("{{ ws_host }}", ws_host)
+                      content = content.replace("{{ ws_port }}", str(ws_port))
 
-              if in_colab:
-                content = content.replace("{{ ws_host }}", "colab")
-                content = content.replace("{{ ws_port }}", str(ws_port))
-              else:
-                content = content.replace("{{ ws_host }}", ws_host)
-                content = content.replace("{{ ws_port }}", str(ws_port))
+                      self.send_response(200)
+                      self.send_header("Content-type", "text/html")
+                      self.end_headers()
+                      self.wfile.write(content.encode("utf-8"))
+                  else:
+                      super().do_GET()
 
-              content = content.replace("{{ fs_host }}", fs_host)
-              content = content.replace("{{ fs_port }}", str(fs_port))
-
-              self.send_response(200)
-              self.send_header("Content-type", "text/html")
-              self.end_headers()
-              self.wfile.write(content.encode("utf-8"))
-            else:
-              # CORRECTED: The 'return' statement was removed here.
-              super().do_GET()
-
-        while True:
-          try:
-            self._httpd = http.server.HTTPServer(
-              (self.fs_host, self.fs_port),
-              QuietSimpleHTTPRequestHandler,
-            )
-            if not in_colab:
-              print(
-                f"File server started at http://{self.fs_host}:{self.fs_port} . "
-                "Open this URL in your browser."
-              )
-            lock.release()
-            break
-          except OSError:
-            self.fs_port += 1
-
-        self.httpd.serve_forever()
+          while True:
+              try:
+                  self._httpd = http.server.HTTPServer(
+                      (self.fs_host, self.fs_port),
+                      QuietSimpleHTTPRequestHandler,
+                  )
+                  if not in_colab:
+                      print(
+                          f"File server started at http://{self.fs_host}:{self.fs_port} . "
+                          "Open this URL in your browser."
+                      )
+                  lock.release()
+                  break
+              except OSError:
+                  self.fs_port += 1
+          self.httpd.serve_forever()
 
       lock = threading.Lock()
       lock.acquire()
       self._fst = threading.Thread(
-        name="visualizer_fs",
-        target=start_server,
-        args=(lock,),
-        daemon=True,
+          name="visualizer_fs",
+          target=start_server,
+          args=(lock,),
+          daemon=True,
       )
       self.fst.start()
 
       while lock.locked():
-        time.sleep(0.001)
+          time.sleep(0.001)
 
       if in_colab:
-          from google.colab.output import eval_js
-          fs_proxy_url = eval_js(f'google.colab.kernel.proxyPort({self.fs_port})')
           print(f"Visualizer is running. Please open this URL in a new tab: {fs_proxy_url}")
       elif self.open_browser:
           import webbrowser

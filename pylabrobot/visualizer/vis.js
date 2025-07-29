@@ -124,11 +124,20 @@ function openSocket() {
 
   socketLoading = true;
   updateStatusLabel("loading");
-  let wsHostInput = document.querySelector(`input[id="ws_host"]`);
-  let wsPortInput = document.querySelector(`input[id="ws_port"]`);
-  let wsHost = wsHostInput.value;
-  let wsPort = wsPortInput.value;
-  webSocket = new WebSocket(`ws://${wsHost}:${wsPort}/`);
+
+  let wsUrlInput = document.querySelector(`input[id="ws_url"]`);
+  let wsUrl = wsUrlInput.value;
+
+  // Use the full URL if provided (for Colab), otherwise build from host/port.
+  if (wsUrl) {
+    webSocket = new WebSocket(wsUrl);
+  } else {
+    let wsHostInput = document.querySelector(`input[id="ws_host"]`);
+    let wsPortInput = document.querySelector(`input[id="ws_port"]`);
+    let wsHost = wsHostInput.value;
+    let wsPort = wsPortInput.value;
+    webSocket = new WebSocket(`ws://${wsHost}:${wsPort}/`);
+  }
 
   webSocket.onopen = function (event) {
     console.log("Connected to " + event.target.url);
@@ -138,7 +147,6 @@ function openSocket() {
 
     heartbeat();
   };
-
 
   webSocket.onerror = function () {
     updateStatusLabel("disconnected");
@@ -150,7 +158,6 @@ function openSocket() {
     socketLoading = false;
   };
 
-  // webSocket.onmessage = function (event) {
   webSocket.addEventListener("message", function (event) {
     var data = event.data;
     data = JSON.parse(data, (key, value) => {
