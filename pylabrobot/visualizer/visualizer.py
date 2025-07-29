@@ -313,85 +313,104 @@ class Visualizer:
       time.sleep(0.001)
 
   def _run_file_server(self):
-    """Start a simple webserver to serve static files."""
+      """Start a simple webserver to serve static files."""
 
-    dirname = os.path.dirname(__file__)
-    path = os.path.join(dirname, ".")
-    if not os.path.exists(path):
-      raise RuntimeError(
-        "Could not find Visualizer files. Please run from the root of the " "repository."
+      dirname = os.path.dirname(__file__)
+      path = os.path.join(dirname, ".")
+      if not os.path.exists(path):
+        raise RuntimeError(
+          "Could not find Visualizer files. Please run from the root of the " "repository."
+        )
+
+      in_colab = 'google.colab' in __import__('sys').modules
+
+      def start_server(lock):
+        ws_host, ws_port, fs_host, fs_port = (
+          self.ws_host,
+          self.ws_port,
+          self.fs_host,
+          self.fs_port,
+        )
+
+        # try to start the server. If the port is in use, try with another port until it succeeds.
+        class QuietSimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+          """A simple HTTP request handler that does not log requests."""
+
+          def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=path, **kwargs)
+
+          def log_message(self, format, *args):
+            pass
+
+          def do_GET(self) -> None:
+            # rewrite some info in the index.html file on the fly,
+            # like a simple template engine
+            if self.path == "/":
+              with open(os.path.join(path, "index.html"), "r", encoding="utf-8") as f:
+                content = f.read()
+
+              if in_colab:
+                from google.colab.output import eval_js
+                from urllib.parse import urlparse
+                # In Colab, we need to use a proxied URL for the websocket.
+                ws_proxy_url = eval_js(f'google.colab.kernel.proxyPort({ws_port})')
+                # The JS will use wss on the same host, so we just need the hostname.
+                # But Colab proxy URLs are more complex. Let's just pass a flag.
+                content = content.replace("{{ ws_host }}", "colab")
+                content = content.replace("{{ ws_port }}", str(ws_port))
+              else:
+                content = content.replace("{{ ws_host }}", ws_host)
+                content = content.replace("{{ ws_port }}", str(ws_port))
+
+              content = content.replace("{{ fs_host }}", fs_host)
+              content = content.replace("{{ fs_port }}", str(fs_port))
+
+              self.send_response(200)
+              self.send_header("Content-type", "text/html")
+              self.end_headers()
+              self.wfile.write(content.encode("utf-8"))
+            else:
+              return super().do_GET()
+
+        while True:
+          try:
+            self._httpd = http.server.HTTPServer(
+              (self.fs_host, self.fs_port),
+              QuietSimpleHTTPRequestHandler,
+            )
+            # Don't print the default message if in colab, we'll print the proxy URL later.
+            if not in_colab:
+              print(
+                f"File server started at http://{self.fs_host}:{self.fs_port} . "
+                "Open this URL in your browser."
+              )
+            lock.release()
+            break
+          except OSError:
+            self.fs_port += 1
+
+        self.httpd.serve_forever()
+
+      lock = threading.Lock()
+      lock.acquire()
+      self._fst = threading.Thread(
+        name="visualizer_fs",
+        target=start_server,
+        args=(lock,),
+        daemon=True,
       )
+      self.fst.start()
 
-    def start_server(lock):
-      ws_host, ws_port, fs_host, fs_port = (
-        self.ws_host,
-        self.ws_port,
-        self.fs_host,
-        self.fs_port,
-      )
+      # Wait for the server to start before opening the browser so that we can get the correct port.
+      while lock.locked():
+        time.sleep(0.001)
 
-      # try to start the server. If the port is in use, try with another port until it succeeds.
-      class QuietSimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
-        """A simple HTTP request handler that does not log requests."""
-
-        def __init__(self, *args, **kwargs):
-          super().__init__(*args, directory=path, **kwargs)
-
-        def log_message(self, format, *args):
-          pass
-
-        def do_GET(self) -> None:
-          # rewrite some info in the index.html file on the fly,
-          # like a simple template engine
-          if self.path == "/":
-            with open(os.path.join(path, "index.html"), "r", encoding="utf-8") as f:
-              content = f.read()
-
-            content = content.replace("{{ ws_host }}", ws_host)
-            content = content.replace("{{ ws_port }}", str(ws_port))
-            content = content.replace("{{ fs_host }}", fs_host)
-            content = content.replace("{{ fs_port }}", str(fs_port))
-
-            self.send_response(200)
-            self.send_header("Content-type", "text/html")
-            self.end_headers()
-            self.wfile.write(content.encode("utf-8"))
-          else:
-            return super().do_GET()
-
-      while True:
-        try:
-          self._httpd = http.server.HTTPServer(
-            (self.fs_host, self.fs_port),
-            QuietSimpleHTTPRequestHandler,
-          )
-          print(
-            f"File server started at http://{self.fs_host}:{self.fs_port} . "
-            "Open this URL in your browser."
-          )
-          lock.release()
-          break
-        except OSError:
-          self.fs_port += 1
-
-      self.httpd.serve_forever()
-
-    lock = threading.Lock()
-    lock.acquire()
-    self._fst = threading.Thread(
-      name="visualizer_fs",
-      target=start_server,
-      args=(lock,),
-      daemon=True,
-    )
-    self.fst.start()
-
-    # Wait for the server to start before opening the browser so that we can get the correct port.
-    while lock.locked():
-      time.sleep(0.001)
-
-    if self.open_browser:
-      webbrowser.open(f"http://{self.fs_host}:{self.fs_port}")
+      if in_colab:
+          from google.colab.output import eval_js
+          fs_proxy_url = eval_js(f'google.colab.kernel.proxyPort({self.fs_port})')
+          print(f"Visualizer is running. Please open this URL in a new tab: {fs_proxy_url}")
+      elif self.open_browser:
+          webbrowser.open(f"http://{self.fs_host}:{self.fs_port}")
 
   async def stop(self):
     """Stop the visualizer.

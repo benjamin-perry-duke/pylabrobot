@@ -116,6 +116,7 @@ async function handleEvent(id, event, data) {
 // ===========================================================================
 
 var socketLoading = false;
+
 function openSocket() {
   if (socketLoading) {
     return;
@@ -137,6 +138,7 @@ function openSocket() {
 
     heartbeat();
   };
+
 
   webSocket.onerror = function () {
     updateStatusLabel("disconnected");
