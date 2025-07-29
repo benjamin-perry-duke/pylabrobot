@@ -350,12 +350,6 @@ class Visualizer:
                 content = f.read()
 
               if in_colab:
-                from google.colab.output import eval_js
-                from urllib.parse import urlparse
-                # In Colab, we need to use a proxied URL for the websocket.
-                ws_proxy_url = eval_js(f'google.colab.kernel.proxyPort({ws_port})')
-                # The JS will use wss on the same host, so we just need the hostname.
-                # But Colab proxy URLs are more complex. Let's just pass a flag.
                 content = content.replace("{{ ws_host }}", "colab")
                 content = content.replace("{{ ws_port }}", str(ws_port))
               else:
@@ -370,7 +364,8 @@ class Visualizer:
               self.end_headers()
               self.wfile.write(content.encode("utf-8"))
             else:
-              return super().do_GET()
+              # CORRECTED: The 'return' statement was removed here.
+              super().do_GET()
 
         while True:
           try:
@@ -378,7 +373,6 @@ class Visualizer:
               (self.fs_host, self.fs_port),
               QuietSimpleHTTPRequestHandler,
             )
-            # Don't print the default message if in colab, we'll print the proxy URL later.
             if not in_colab:
               print(
                 f"File server started at http://{self.fs_host}:{self.fs_port} . "
@@ -401,7 +395,6 @@ class Visualizer:
       )
       self.fst.start()
 
-      # Wait for the server to start before opening the browser so that we can get the correct port.
       while lock.locked():
         time.sleep(0.001)
 
@@ -410,6 +403,7 @@ class Visualizer:
           fs_proxy_url = eval_js(f'google.colab.kernel.proxyPort({self.fs_port})')
           print(f"Visualizer is running. Please open this URL in a new tab: {fs_proxy_url}")
       elif self.open_browser:
+          import webbrowser
           webbrowser.open(f"http://{self.fs_host}:{self.fs_port}")
 
   async def stop(self):
