@@ -412,12 +412,11 @@ class Visualizer:
       RuntimeError: If the visualizer has not been started.
     """
 
-    # -- file server --
-    # Stop the file server.
+    # stop the file server.
     self.httpd.shutdown()
     self.httpd.server_close()
 
-    # Clear all relevant attributes.
+    # clear all relevant attributes.
     self._httpd = None
     self._fst = None
 
@@ -429,7 +428,7 @@ class Visualizer:
       # must be thread safe, because event loop is running in a separate thread
       self.loop.call_soon_threadsafe(self.stop_.set_result, "done")
 
-    # Clear all relevant attributes.
+    # clear all relevant attributes.
     self.received.clear()
     self._websocket = None
     self._loop = None
@@ -437,6 +436,7 @@ class Visualizer:
     self._stop_ = None
 
     self.setup_finished = False
+
 
   async def _send_resources_and_state(self):
     """Private method for sending the resource and state to the browser. This is called after the
